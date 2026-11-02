@@ -17,7 +17,12 @@ class RFM95WInterface
     public:
         RFM95WInterface(const RFM95WInterface&) = delete;
         RFM95WInterface& operator=(const RFM95WInterface&) = delete;
+        /// HAL Implementation for SPI
+        /// @param tx transmit buffer
+        /// @param rx receive buffer
+        /// @return
         virtual ErrorCode spiTransfer(std::span<const uint8_t> tx, std::span<uint8_t> rx) = 0;
+        /// Toggle the reset pin
         virtual void reset() = 0;
 
     protected:

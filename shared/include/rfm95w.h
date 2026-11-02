@@ -9,16 +9,18 @@
 #include <span>
 #include <expected>
 
+#include "rfm95w_constants.h"
 #include "rfm95w_interface.h"
 
 /// RFM95W LoRa driver
 class RFM95W {
 public:
     explicit RFM95W(RFM95WInterface& interface) : m_interface(interface) {}
-    ErrorCode start();
+    ErrorCode boot();
+    ErrorCode beginReceive();
     ErrorCode transmit(std::span<uint8_t> buf);
-    ErrorCode receive(std::span<uint8_t> buf);
-    ErrorCode clearIRQ();
+    ErrorCode getPayload(std::span<uint8_t> buf);
+    ErrorCode clearIRQ_txDone();
 private:
     RFM95WInterface& m_interface;
     [[nodiscard]] std::expected<uint8_t, ErrorCode>  readRegister(uint8_t addr) const;

@@ -12,7 +12,6 @@
 #include "../../../shared/include/rfm95w.h"
 #include "rfm95w_stm32interface.h"
 
-// Todo: look into CMSIS2 wrappers vs FreeRTOS
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
@@ -130,7 +129,7 @@ void StartRadioTask(void *pvParameters) {
     vTaskDelay(500 / portTICK_RATE_MS);
     static RFM95WInterfaceSTM32 radioInterface(&hspi1, GPIOB, GPIO_PIN_6, GPIOC, GPIO_PIN_7);
     static RFM95W radio(radioInterface);
-    if (const auto start_err = radio.start(); start_err != ErrorCode::Success) {
+    if (const auto start_err = radio.boot(); start_err != ErrorCode::Success) {
         sendUARTErrorCode(start_err);
     };
     BaseType_t taskWoken = pdTRUE;
@@ -146,7 +145,7 @@ void StartRadioTask(void *pvParameters) {
             sendUARTErrorCode(transmitRet);
         }
         ulTaskNotifyTake(taskWoken, notifyTICKS);
-        if (const auto clearRet = radio.clearIRQ(); clearRet != ErrorCode::Success) {
+        if (const auto clearRet = radio.clearIRQ_txDone(); clearRet != ErrorCode::Success) {
             sendUARTErrorCode(clearRet);
         }
     }

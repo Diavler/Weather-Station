@@ -1,19 +1,23 @@
-# STM32 Weather Station
-- Built & tested on STM32 446RE
-- Contains C++ drivers for BME280, BMP580, and RFM95W.
-  - Temperature, Pressure, Humidity
-  - Transmit and Receive packets via LoRa
-- FreeRTOS used for concurrency and interrupt management (SensorTask, RadioTask)
-- The other half of the "station" is an ESP32, which receives the data and broadcasts it via WiFi
+# Weather Station
+## Overview
+This repo contains C++23 code for an STM32 446RE, ESP32, and some shared driver code. The goal is to collect weather data,
+transmit it via LoRa, and then make it accessible with WiFi.
+### STM32
+On the STM32 side, there are drivers for a BME280 and BMP580 (environment sensors). 
+The STM32 also implements an interface for an RFM95W (driver is in shared folder). The STM32's RFM95W
+transmits the weather data over LoRa to the ESP32.
+### ESP32
+On the ESP32 side, there is an interface for an RFM95W. The ESP32 broadcasts the weather data received
+from the STM32 on WiFi with UDP.
+### FreeRTOS
+FreeRTOS is used on the STM32 and ESP32 for concurrency, queues, task notifications, and interrupts.
 ## Todo
-1. Migrate C data structures to C++ standard library (i.e. std::array)
-2. Implement FreeRTOS data structures
-3. Complete RFM95W driver functionality
-4. Refactor error handling for RFM95W driver (temporary return values as of now)
-5. Refactor rfm95w driver to have an interface, so stm32 and esp32 can use their respective HAL.
-6. Implement ESP32 recieving end
-7. Implement ESP32 UDP transmission on WiFi
-8. Implement desktop recieving end
+- Migrate C data structures to C++ standard library 
+- Add mutexes if needed
+- Implement ESP32 recieving end
+- Implement ESP32 UDP transmission on WiFi
+- Implement desktop recieving end
+- After everything is working: refactor sensor drivers & tasks (stm32)
 ## Building
 Install:
 - STM32CubeMX

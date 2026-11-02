@@ -12,8 +12,9 @@ enum class [[nodiscard]] ErrorCode : uint8_t {
     spiError,
     i2cError,
     uartError,
-    Timeout,
+    timeout,
     invalidArgs,
+    badPacket,
 };
 
 /// Convert generic error codes to strings
@@ -23,8 +24,9 @@ constexpr const char8_t* errorString(const ErrorCode error) {
         case ErrorCode::spiError:           return u8"SPI Failure\r\n";
         case ErrorCode::i2cError:           return u8"I2C Failure\r\n";
         case ErrorCode::uartError:          return u8"UART Failure\r\n";
-        case ErrorCode::Timeout:            return u8"Timeout\r\n";
+        case ErrorCode::timeout:            return u8"Timeout\r\n";
         case ErrorCode::invalidArgs:        return u8"Invalid arguments\r\n";
+        case ErrorCode::badPacket:          return u8"Bad packet\r\n";
         default:                            return u8"ERROR: UNKNOWN\r\n";
     }
 }
