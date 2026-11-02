@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdio>
 #include <cstring>
+#include <string_view>
 
 #include "bme280.h"
 #include "bmp580.h"
@@ -65,39 +66,36 @@ extern I2C_HandleTypeDef hi2c1;
 extern SPI_HandleTypeDef hspi1;
 extern UART_HandleTypeDef huart2;
 
-/// TASKS
+/* UART Helpers */
 
-void main_ws() {
-    vCreateSensorTask();
-    vCreateRadioTask();
-
-    vTaskStartScheduler();
-}
-
-/// Temporary function to clean up errors. Todo: implement more elegant string / error handling
-static void sendUARTErrorCode(ErrorCode err) {
+static void printErrorUART(const ErrorCode err) {
     const auto msg = errorString(err);
     HAL_UART_Transmit(&huart2, reinterpret_cast<const uint8_t *>(msg), strlen(reinterpret_cast<const char *>(msg)), HAL_MAX_DELAY);
 }
 
+static void printUART(const std::string_view msg) {
+    HAL_UART_Transmit(&huart2, reinterpret_cast<const uint8_t*>(msg.data()), msg.length(), HAL_MAX_DELAY);
+}
+
+void main_ws() {
+    vCreateSensorTask();
+    vCreateRadioTask();
+    vTaskStartScheduler();
+}
+
 void StartSensorTask(void *pvParameters) {
-    // TODO: implement cleaner error codes + handling
     if (BMP580::start(&hi2c1) == ErrorCode::i2cError) {
-        char startFailMsg[] = "ERROR: BMP580 failed to start.\r\n";
-        HAL_UART_Transmit(&huart2, reinterpret_cast<uint8_t*>(startFailMsg), strlen(startFailMsg), HAL_MAX_DELAY);
+        printUART("BMP580: failed to start!\r\n");
         vTaskDelete(nullptr);
     } else {
-        char startMsg[] = "BMP580 powered on!\r\n";
-        HAL_UART_Transmit(&huart2, reinterpret_cast<uint8_t*>(startMsg), strlen(startMsg), HAL_MAX_DELAY);
+        printUART("BMP580: powered on!\r\n");
     }
 
     if (BME280::start(&hi2c1) == ErrorCode::i2cError) {
-        char startFailMsg[] = "ERROR: BME280 failed to start.\r\n";
-        HAL_UART_Transmit(&huart2, reinterpret_cast<uint8_t*>(startFailMsg), strlen(startFailMsg), HAL_MAX_DELAY);
+        printUART("BME280: failed to start!\r\n");
         vTaskDelete(nullptr);
     } else {
-        char startMsg[] = "BME280 powered on!\r\n";
-        HAL_UART_Transmit(&huart2, reinterpret_cast<uint8_t*>(startMsg), strlen(startMsg), HAL_MAX_DELAY);
+        printUART("BME280: powered on!\r\n");
     }
 
     for(;;)
@@ -106,8 +104,8 @@ void StartSensorTask(void *pvParameters) {
         const auto presRet = BMP580::readPressure();
         const auto humRet   = BME280::readHumidity();
 
-        for (ErrorCode err : {tempRet, presRet, humRet}) {
-            if (err == ErrorCode::i2cError) {sendUARTErrorCode(ErrorCode::i2cError);}
+        for (const ErrorCode err : {tempRet, presRet, humRet}) {
+            if (err == ErrorCode::i2cError) {printErrorUART(ErrorCode::i2cError);}
         }
 
         const sensorBundle sensorReading{
@@ -130,7 +128,7 @@ void StartRadioTask(void *pvParameters) {
     static RFM95WInterfaceSTM32 radioInterface(&hspi1, GPIOB, GPIO_PIN_6, GPIOC, GPIO_PIN_7);
     static RFM95W radio(radioInterface);
     if (const auto start_err = radio.boot(); start_err != ErrorCode::Success) {
-        sendUARTErrorCode(start_err);
+        printErrorUART(start_err);
     };
     BaseType_t taskWoken = pdTRUE;
 
@@ -142,15 +140,17 @@ void StartRadioTask(void *pvParameters) {
         xQueueReceive(xQueue, txBuf.data(), pdMS_TO_TICKS(1000));
         HAL_UART_Transmit(&huart2, txBuf.data(), txBuf.size(), HAL_MAX_DELAY);
         if (const auto transmitRet = radio.transmit(txBuf); transmitRet != ErrorCode::Success) {
-            sendUARTErrorCode(transmitRet);
+            printErrorUART(transmitRet);
         }
         ulTaskNotifyTake(taskWoken, notifyTICKS);
         if (const auto clearRet = radio.clearIRQ_txDone(); clearRet != ErrorCode::Success) {
-            sendUARTErrorCode(clearRet);
+            printErrorUART(clearRet);
         }
     }
     vTaskDelete(nullptr);
 }
+
+/* Callback for G0 / DIO0 TxDone */
 
 extern "C" void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
     if (GPIO_Pin == GPIO_PIN_9 && xRadioTaskHandle != nullptr) {
