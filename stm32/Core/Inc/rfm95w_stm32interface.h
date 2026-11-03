@@ -7,6 +7,8 @@
 
 #include <../../../shared/include/rfm95w_interface.h>
 #include "stm32f4xx_hal.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 class RFM95WInterfaceSTM32 final : public RFM95WInterface
 {
@@ -18,15 +20,18 @@ class RFM95WInterfaceSTM32 final : public RFM95WInterface
 
         ErrorCode spiTransfer(std::span<const uint8_t> tx, std::span<uint8_t> rx) override;
         void reset() override;
-
+        void onDIO0Interrupt() override;
+        void setIRQ() override;
+        bool waitForIRQ(uint32_t timeoutMs) override;
     private:
         SPI_HandleTypeDef* m_hspiPtr = nullptr;
-        void resetCS() override { HAL_GPIO_WritePin(m_csPort, m_csPin, GPIO_PIN_RESET); }
-        void setCS() override { HAL_GPIO_WritePin(m_csPort, m_csPin, GPIO_PIN_SET); }
+        void resetCS() { HAL_GPIO_WritePin(m_csPort, m_csPin, GPIO_PIN_RESET); }
+        void setCS() { HAL_GPIO_WritePin(m_csPort, m_csPin, GPIO_PIN_SET); }
         GPIO_TypeDef* m_csPort;
         uint16_t m_csPin;
         GPIO_TypeDef* m_rstPort;
         uint16_t m_rstPin;
+        volatile TaskHandle_t m_waitingTask = nullptr;
 
 
 };

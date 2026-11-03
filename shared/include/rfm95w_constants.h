@@ -43,8 +43,9 @@ static constexpr uint8_t MAX_PAYSIZE    = 0x20; // 32 bytes payload
 static constexpr uint8_t REG_FIFO       = 0x00;
 static constexpr uint8_t REG_FIFO_ADDR  = 0x0D;
 static constexpr uint8_t REG_PAYLEN     = 0x22;
-static constexpr uint8_t FIFO_TX_BASE   = 0x00;
-static constexpr uint8_t FIFO_RX_BASE   = 0x80;
+static constexpr uint8_t REG_FIFO_ADDR_PTR  = 0x0D;
+static constexpr uint8_t FIFO_TX_BASE   = 0x80;
+static constexpr uint8_t FIFO_RX_BASE   = 0x00;
 
 // IRQ Flags
 static constexpr uint8_t REG_IRQ_FLAGS  = 0x12;
@@ -59,6 +60,8 @@ static constexpr uint8_t REG_RXNBBYTES  = 0x13;
 static constexpr uint8_t REG_FIFO_RX_CURR_ADDR = 0x10;
 static constexpr uint8_t REG_FIFO_RX_BYTE_ADDR = 0x25;
 static constexpr uint8_t REG_RX_NB_BYTES = 0x13;
+
+static constexpr uint8_t REG_VERSION = 0x42;
 
 /* End of Constants */
 

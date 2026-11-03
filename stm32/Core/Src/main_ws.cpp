@@ -66,11 +66,15 @@ extern I2C_HandleTypeDef hi2c1;
 extern SPI_HandleTypeDef hspi1;
 extern UART_HandleTypeDef huart2;
 
+/* Radio */
+namespace {
+    RFM95WInterfaceSTM32* m_radioInterface = nullptr;
+}
 /* UART Helpers */
 
 static void printErrorUART(const ErrorCode err) {
     const auto msg = errorString(err);
-    HAL_UART_Transmit(&huart2, reinterpret_cast<const uint8_t *>(msg), strlen(reinterpret_cast<const char *>(msg)), HAL_MAX_DELAY);
+    HAL_UART_Transmit(&huart2, reinterpret_cast<const uint8_t *>(msg.data()), strlen(reinterpret_cast<const char *>(msg.data())), HAL_MAX_DELAY);
 }
 
 static void printUART(const std::string_view msg) {
@@ -78,6 +82,9 @@ static void printUART(const std::string_view msg) {
 }
 
 void main_ws() {
+    static RFM95WInterfaceSTM32 radioInterface(&hspi1, GPIOB, GPIO_PIN_6, GPIOC, GPIO_PIN_7);
+    m_radioInterface = &radioInterface;
+
     vCreateSensorTask();
     vCreateRadioTask();
     vTaskStartScheduler();
@@ -116,35 +123,26 @@ void StartSensorTask(void *pvParameters) {
             sensorReading.temperature, sensorReading.pressure, sensorReading.humidity);
         HAL_UART_Transmit(&huart2, reinterpret_cast<uint8_t*>(output), len, HAL_MAX_DELAY);
 
-        xQueueSend(xQueue, &sensorReading, pdTICKS_TO_MS(5000));
-        xTaskNotifyGive(xRadioTaskHandle);
-        vTaskDelay(pdTICKS_TO_MS(5000));
+        xQueueSend(xQueue, &sensorReading, pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(5000));
     }
     vTaskDelete(nullptr);
 }
 
 void StartRadioTask(void *pvParameters) {
     vTaskDelay(500 / portTICK_RATE_MS);
-    static RFM95WInterfaceSTM32 radioInterface(&hspi1, GPIOB, GPIO_PIN_6, GPIOC, GPIO_PIN_7);
-    static RFM95W radio(radioInterface);
+    RFM95W radio(*m_radioInterface);
     if (const auto start_err = radio.boot(); start_err != ErrorCode::Success) {
         printErrorUART(start_err);
-    };
-    BaseType_t taskWoken = pdTRUE;
+        vTaskDelete(nullptr);
+    }
 
     for (;;) {
-        constexpr TickType_t notifyTICKS = 250;
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        xTaskNotifyStateClear(xRadioTaskHandle);
-        std::array<uint8_t, 32> txBuf{};
-        xQueueReceive(xQueue, txBuf.data(), pdMS_TO_TICKS(1000));
-        HAL_UART_Transmit(&huart2, txBuf.data(), txBuf.size(), HAL_MAX_DELAY);
-        if (const auto transmitRet = radio.transmit(txBuf); transmitRet != ErrorCode::Success) {
+        std::array<uint8_t, 12> txBuf{};
+        if (xQueueReceive(xQueue, txBuf.data(), pdMS_TO_TICKS(1000)) != pdTRUE) continue;
+        //HAL_UART_Transmit(&huart2, txBuf.data(), txBuf.size(), HAL_MAX_DELAY);
+        if (const auto transmitRet = radio.transmit(txBuf, 250); transmitRet != ErrorCode::Success) {
             printErrorUART(transmitRet);
-        }
-        ulTaskNotifyTake(taskWoken, notifyTICKS);
-        if (const auto clearRet = radio.clearIRQ_txDone(); clearRet != ErrorCode::Success) {
-            printErrorUART(clearRet);
         }
     }
     vTaskDelete(nullptr);
@@ -153,10 +151,8 @@ void StartRadioTask(void *pvParameters) {
 /* Callback for G0 / DIO0 TxDone */
 
 extern "C" void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-    if (GPIO_Pin == GPIO_PIN_9 && xRadioTaskHandle != nullptr) {
-        BaseType_t taskWoken = pdFALSE;
-        vTaskNotifyGiveFromISR(xRadioTaskHandle, &taskWoken);
-        portYIELD_FROM_ISR(taskWoken);
+    if (GPIO_Pin == GPIO_PIN_9) {
+        m_radioInterface->onDIO0Interrupt();
     }
 }
 

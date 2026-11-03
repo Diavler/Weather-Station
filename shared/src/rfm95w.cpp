@@ -49,7 +49,12 @@ ErrorCode RFM95W::updateRegister(const uint8_t addr, const uint8_t mask, const u
 /// Set RFM95W to LoRa mode at 915MHz with CRC on
 /// @return
 ErrorCode RFM95W::boot() {
+    if (const auto err = m_interface.init(); err != ErrorCode::Success) return err;
     m_interface.reset();
+
+    const auto ver = readRegister(REG_VERSION);
+    if (!ver) return ver.error();
+    if (*ver != 0x12) return ErrorCode::badDevice;
 
     // Enable LoRa + Standby
     static constexpr std::array<RegUpdate, 3> updateOPMODE {{
@@ -69,7 +74,7 @@ ErrorCode RFM95W::boot() {
     for (const auto& [addr, val] : setFREQ) {
         if (const auto err = writeRegister(addr, val); err != ErrorCode::Success) return err;
     }
-    static constexpr std::array<RegUpdate, 3> setMISC {{
+    static constexpr std::array<RegUpdate, 2> setMISC {{
         {.addr = REG_MCONF2, .mask = SET_CRC, .val = SET_CRC},          // RxPayloadCrcOn to 1
         {.addr = REG_PACONF, .mask = SET_PABOOST, .val = SET_PABOOST},  // PaSelect to PA_BOOST pin
     }};
@@ -82,33 +87,32 @@ ErrorCode RFM95W::boot() {
 
 /// Transmit a buffer with len bytes
 /// @param buf data to transmit
+/// @param timeoutMs interrupt timeout
 /// @return
-ErrorCode RFM95W::transmit(std::span<uint8_t> buf) {
+ErrorCode RFM95W::transmit(std::span<uint8_t> buf, const uint32_t timeoutMs) {
     // Clear all IRQ flags
     if (const auto err = writeRegister(REG_IRQ_FLAGS, 0xFF); err != ErrorCode::Success) return err;
     // Map DIO0 --> TxDone
     if (const auto err = updateRegister(REG_DIOMAP1, MASK_DIO0, SET_DIO0TX); err != ErrorCode::Success) return err;
     // Set FifoPtrAddr --> FifoTxPtrBase
-    if (const auto err = writeRegister(REG_FIFO_ADDR, FIFO_TX_BASE); err != ErrorCode::Success) return err;
+    if (const auto err = writeRegister(REG_FIFO_ADDR_PTR, FIFO_TX_BASE); err != ErrorCode::Success) return err;
 
     // Assemble buffer
     std::array<uint8_t, MAX_PAYSIZE + 1> tx{};
     tx[0] = static_cast<uint8_t>(REG_FIFO | 0x80);
     std::copy(buf.begin(), buf.end(), tx.begin()+1);
 
-    // Set TX mode
-    if (const auto err = updateRegister(REG_OPMODE, MASK_MODE, MODE_TX); err != ErrorCode::Success) return err;
+
     // Set Payload
     if (const auto err = writeRegister(REG_PAYLEN, tx.size()-1); err != ErrorCode::Success) return err;
     // Transmit
     if (const auto err = m_interface.spiTransfer(tx, {}); err != ErrorCode::Success) return err;
+    // Set TX mode
+    m_interface.setIRQ();
+    if (const auto err = updateRegister(REG_OPMODE, MASK_MODE, MODE_TX); err != ErrorCode::Success) return err;
+    // Check Interrupt issued
+    if (!m_interface.waitForIRQ(timeoutMs)) return ErrorCode::timeout;
 
-    return ErrorCode::Success;
-}
-
-/// Clear TxDone after an interrupt
-/// @return
-ErrorCode RFM95W::clearIRQ_txDone() {
     return writeRegister(REG_IRQ_FLAGS, MASK_TXDONE);
 }
 
@@ -117,6 +121,10 @@ ErrorCode RFM95W::clearIRQ_txDone() {
 ErrorCode RFM95W::beginReceive() {
     // Map DIO0 --> RxDone
     if (const auto err = updateRegister(REG_DIOMAP1, MASK_DIO0, SET_DIO0RX); err != ErrorCode::Success) return err;
+    // Reset IRQ
+    m_interface.setIRQ();
+    // Clear all IRQ flags
+    if (const auto err = writeRegister(REG_IRQ_FLAGS, 0xFF); err != ErrorCode::Success) return err;
     // Mode --> RX Continuous
     if (const auto err = updateRegister(REG_OPMODE, MASK_MODE, MODE_RXC); err != ErrorCode::Success) return err;
 
@@ -125,37 +133,53 @@ ErrorCode RFM95W::beginReceive() {
 
 /// Check IRQ flags and read FIFO into buf. Call beginReceive() before.
 /// @param buf buffer to read into
-/// @return
-ErrorCode RFM95W::getPayload(std::span<uint8_t> buf) {
-    // Check the IRQ
+/// @param timeoutMs interrupt timeout
+/// @return Number of bytes read from payload or an ErrorCode
+std::expected<uint8_t, ErrorCode> RFM95W::getPayload(std::span<uint8_t> buf, const uint32_t timeoutMs) {
+    if (!m_interface.waitForIRQ(timeoutMs)) return std::unexpected(ErrorCode::timeout);
+    // Get IRQ flags
     auto irqFlags = readRegister(REG_IRQ_FLAGS);
-    if (!irqFlags) return irqFlags.error();
-    if (!(*irqFlags | MASK_RXDONE))     return ErrorCode::badPacket;
-    if (*irqFlags | MASK_PLCRCERR)      return ErrorCode::badPacket;
-    constexpr uint8_t setIRQ = MASK_RXDONE | MASK_RXTIMEOUT | MASK_PLCRCERR | MASK_VALHEADER;
-    if (const auto err = writeRegister(REG_IRQ_FLAGS, setIRQ); err != ErrorCode::Success) return err;
+    if (!irqFlags) return std::unexpected(irqFlags.error());
+
+    m_interface.setIRQ();
+    // Clear the IRQ Flags
+    constexpr uint8_t clearIRQFlags = MASK_RXDONE | MASK_RXTIMEOUT | MASK_PLCRCERR | MASK_VALHEADER;
+    if (const auto err = writeRegister(REG_IRQ_FLAGS, clearIRQFlags); err != ErrorCode::Success) return std::unexpected(err);
+
+    // Check validity with IRQ Flags
+    if (!(*irqFlags & MASK_RXDONE))     return std::unexpected(ErrorCode::badPacket);
+    if (*irqFlags & MASK_PLCRCERR)      return std::unexpected(ErrorCode::crcError);
 
     // Get amount of bytes
-    const auto fifoRxBytesNb = readRegister(REG_RX_NB_BYTES);
-    if (!fifoRxBytesNb) return ErrorCode::spiError;
-    if (*fifoRxBytesNb > MAX_PAYSIZE) return ErrorCode::spiError;
+    const auto payLen = readRegister(REG_RX_NB_BYTES);
+    if (!payLen) return std::unexpected(payLen.error());
+    if (*payLen > MAX_PAYSIZE || *payLen == 0 || *payLen > buf.size()) return std::unexpected(ErrorCode::invalidLength);
 
     // Get the location of the packet
     const auto fifoRxCurrentAddr = readRegister(REG_FIFO_RX_CURR_ADDR);
-    if (!fifoRxCurrentAddr) return ErrorCode::spiError;
+    if (!fifoRxCurrentAddr) return std::unexpected(fifoRxCurrentAddr.error());
 
     // Set FifoPtrAddr --> FifoRxCurrentAddr
-    if (const auto err = writeRegister(REG_FIFO_ADDR, *fifoRxCurrentAddr); err != ErrorCode::Success) return err;
+    if (const auto err = writeRegister(REG_FIFO_ADDR, *fifoRxCurrentAddr); err != ErrorCode::Success) return std::unexpected(err);
     // Temporary buffers
     constexpr auto spiSize = MAX_PAYSIZE + 1;
     std::array<uint8_t, spiSize> tx{REG_FIFO & 0x7F};
     std::array<uint8_t, spiSize> rx{};
     // Make a view with the correct size to read into
-    const auto viewTx = std::span(tx).first(*fifoRxBytesNb + 1);
-    const auto viewRx = std::span(rx).first(*fifoRxBytesNb + 1);
+    const auto viewTx = std::span(tx).first(*payLen + 1);
+    const auto viewRx = std::span(rx).first(*payLen + 1);
 
-    if (const auto err = m_interface.spiTransfer(viewTx, viewRx); err != ErrorCode::Success) return err;
-    std::copy(rx.begin(), rx.end(), buf.begin());
+    if (const auto err = m_interface.spiTransfer(viewTx, viewRx); err != ErrorCode::Success) return std::unexpected(err);
+    std::copy(viewRx.begin() + 1, viewRx.end(), buf.begin());
 
-    return ErrorCode::Success;
+    return *payLen;
+}
+
+std::expected<RFM95W::DebugRegs, ErrorCode> RFM95W::debugRegs() const {
+    const auto flags = readRegister(REG_IRQ_FLAGS);
+    const auto op    = readRegister(REG_OPMODE);
+    const auto dio   = readRegister(REG_DIOMAP1);
+    const auto ver = readRegister(REG_VERSION);
+    if (!flags || !op || !dio || !ver) return std::unexpected(ErrorCode::spiError);
+    return DebugRegs{ *flags, *op, *dio, *ver};
 }

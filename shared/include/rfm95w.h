@@ -18,9 +18,10 @@ public:
     explicit RFM95W(RFM95WInterface& interface) : m_interface(interface) {}
     ErrorCode boot();
     ErrorCode beginReceive();
-    ErrorCode transmit(std::span<uint8_t> buf);
-    ErrorCode getPayload(std::span<uint8_t> buf);
-    ErrorCode clearIRQ_txDone();
+    ErrorCode transmit(std::span<uint8_t> buf, uint32_t timeoutMs);
+    std::expected<uint8_t, ErrorCode> getPayload(std::span<uint8_t> buf, uint32_t timeoutMs);
+    struct DebugRegs { uint8_t irqFlags, opMode, dioMap1, version; };
+    [[nodiscard]] std::expected<DebugRegs, ErrorCode> debugRegs() const;
 private:
     RFM95WInterface& m_interface;
     [[nodiscard]] std::expected<uint8_t, ErrorCode>  readRegister(uint8_t addr) const;
