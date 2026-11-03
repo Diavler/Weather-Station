@@ -1,2 +1,0 @@
-source /home/haydn/CLionProjects/Weather-Station/esp32/build/bootloader/gdbinit/symbols
-source /home/haydn/CLionProjects/Weather-Station/esp32/build/bootloader/gdbinit/connect
