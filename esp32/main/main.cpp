@@ -148,15 +148,14 @@ void StartNetworkTask(void *pvParameters)
     // Setup
     wifiSetup();
     const auto sock = socket(AF_INET, SOCK_DGRAM, 0);
+    constexpr int opt = 1;
+    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
     addr.sin_port = htons(WIFI_PORT);
-    bind(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
-
-    constexpr int opt = 1;
-    setsockopt(sock, SOL_SOCKET, SO_BROADCAST, &opt, sizeof(opt));
+    //bind(sock, reinterpret_cast<sockaddr *>(&addr), sizeof(addr));
 
     for (;;)
     {
