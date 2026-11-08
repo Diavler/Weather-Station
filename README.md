@@ -12,15 +12,12 @@ from the STM32 on WiFi with UDP.
 ### FreeRTOS
 FreeRTOS is used on the STM32 and ESP32 for concurrency, queues, task notifications, and interrupts.
 ## Todo
-- Migrate C data structures to C++ standard library 
-- Add mutexes if needed
-- Implement ESP32 recieving end
-- Implement ESP32 UDP transmission on WiFi
-- Implement desktop recieving end
-- After everything is working: refactor sensor drivers & tasks (stm32)
+- Cleanup/refactoring
+- Flesh out readme
 ## Building
 Install:
 - STM32CubeMX
 - STM32CubeCLT
 - arm-none-eabi-gcc
 - arm-none-eabi-gdb
+- ESP-IDF
